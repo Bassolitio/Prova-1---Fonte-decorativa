@@ -1,0 +1,201 @@
+clc;
+clear;
+close all;
+
+%% Referência
+yref = 120;
+
+%% Incerteza do ganho
+Knom = 10;
+Kmin = 9;
+Kmax = 11;
+
+K = Knom;    % Troque para Kmin ou Kmax para testar
+
+%% Planta com atraso
+L = 1;       % atraso de transporte (s)
+
+G = tf(K,[40 1]);
+G.InputDelay = L;
+
+%% Discretização
+Ts = 0.01;
+t = 0:Ts:400;
+
+Gd = c2d(G,Ts);
+
+[A,B,Cp,Dp] = ssdata(ss(Gd));
+
+%% PID Ziegler-Nichols
+Kp = 4.8;
+Ki = 2.4;
+Kd = 2.4;
+
+%% Saturação da bomba
+umin = 0;
+umax = 24;
+
+%% Anti-windup
+Kb = 0.5;
+
+%% Vetores
+n = length(t);
+
+y = zeros(n,1);
+u = zeros(n,1);
+e = zeros(n,1);
+
+%% Estados da planta
+x = zeros(size(A,1),1);
+
+%% Variáveis PID
+
+I = 0;
+
+y_ant = 0;
+dydt_filt = 0;
+
+alpha = 0.95;    % filtro derivativo
+
+for k = 2:n
+
+    %% Erro
+
+    e(k) = yref - y(k-1);
+
+    %% Anti-Derivative Kick
+    % derivada da saída
+
+    dydt = (y(k-1)-y_ant)/Ts;
+
+    dydt_filt = alpha*dydt_filt + ...
+               (1-alpha)*dydt;
+
+    Dterm = -Kd*dydt_filt;
+
+    %% PID sem saturação
+
+    upid = Kp*e(k) + I + Dterm;
+
+    %% Saturação
+
+    u(k) = min(max(upid,umin),umax);
+
+    %% Anti-Windup
+
+    I = I ...
+        + Ki*e(k)*Ts ...
+        + Kb*(u(k)-upid)*Ts;
+
+    %% Planta
+
+    x = A*x + B*u(k);
+    y(k) = Cp*x + Dp*u(k);
+
+    %% Atualização
+
+    y_ant = y(k);
+
+end
+
+%% Informações
+
+fprintf('\n');
+fprintf('K utilizado = %.2f\n',K);
+fprintf('Nivel maximo = %.2f mm\n',max(y));
+fprintf('Tensao maxima = %.2f V\n',max(u));
+
+%% Gráfico da resposta
+
+figure
+plot(t,y,'b','LineWidth',2)
+hold on
+yline(120,'r--','120 mm')
+grid on
+xlabel('Tempo (s)')
+ylabel('Nível (mm)')
+title('Resposta ao Degrau - PID Ziegler-Nichols')
+
+%% Gráfico do controle
+
+figure
+plot(t,u,'LineWidth',2)
+hold on
+yline(24,'r--','24 V')
+grid on
+xlabel('Tempo (s)')
+ylabel('Tensão (V)')
+title('Sinal de Controle')
+
+%% ==========================================================
+%% Análise de Robustez (Bode)
+%% ==========================================================
+
+s = tf('s');
+
+Tf = -Ts/log(alpha);
+
+C = Kp + Ki/s + (Kd*s)/(Tf*s+1);
+
+Laberta = C*G;
+
+figure
+margin(Laberta)
+grid on
+title('Diagrama de Bode - PID Ziegler-Nichols')
+
+[Gm,Pm,Wcg,Wcp] = margin(Laberta);
+
+fprintf('\n--- RESULTADOS DO BODE ---\n');
+
+fprintf('Margem de fase = %.2f graus\n',Pm);
+
+if isinf(Gm)
+    fprintf('Margem de ganho = Infinita\n');
+else
+    fprintf('Margem de ganho = %.2f dB\n',20*log10(Gm));
+end
+
+fprintf('Frequência de cruzamento de ganho = %.3f rad/s\n',Wcp);
+fprintf('Frequência de cruzamento de fase = %.3f rad/s\n',Wcg);
+
+%% ==========================================================
+%% Polos e Zeros
+%% ==========================================================
+
+%% ==========================================================
+%% Aproximação de Padé para visualizar polos
+%% ==========================================================
+
+ordemPade = 3;
+
+[numPade,denPade] = pade(L,ordemPade);
+
+DelayPade = tf(numPade,denPade);
+
+Gpade = tf(K,[40 1]) * DelayPade;
+
+%% Malha aberta
+
+LabertaPade = C * Gpade;
+
+%% Malha fechada
+
+Tfechada = feedback(LabertaPade,1);
+
+%% Polos da malha fechada
+
+polosMF = pole(Tfechada);
+
+disp(' ')
+disp('--- POLOS DA MALHA FECHADA ---')
+disp(polosMF)
+
+%% Gráfico
+
+figure
+pzmap(Tfechada)
+grid on
+title('Polos da Malha Fechada - PID Ziegler Nichols')
+
+Esse é o meu
