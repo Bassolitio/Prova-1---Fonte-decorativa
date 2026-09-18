@@ -55,7 +55,7 @@ Ki1 = Kp_ideal/Ti_ideal;
 Kd1 = Kp_ideal*Td_ideal;
 
 % Sintonia Ajustada
-
+%% Ajuste aqui os parâmetros [+-0.1, +-1]
 Kp2 = Kp_ideal - 0.1;
 Ki2 = (Kp_ideal/Ti_ideal) - 0.1;
 Kd2 = (Kp_ideal*Td_ideal) - 0.1;
