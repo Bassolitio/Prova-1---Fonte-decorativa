@@ -1,0 +1,335 @@
+clc;
+clear;
+close all;
+
+%% ==========================================================
+%% REFERENCIA
+%% ==========================================================
+yref = 120;
+
+%% ==========================================================
+%% INCERTEZA DO GANHO
+%% ==========================================================
+Knom = 10;
+K = Knom;
+
+%% ==========================================================
+%% PLANTA COM ATRASO
+%% ==========================================================
+L = 1;
+tau = 40;
+
+G = tf(K,[tau 1]);
+G.InputDelay = L;
+
+%% ==========================================================
+%% DISCRETIZACAO
+%% ==========================================================
+Ts = 0.01;
+t = 0:Ts:400;
+
+Gd = c2d(G,Ts);
+
+[A,B,Cp,Dp] = ssdata(ss(Gd));
+
+%% ==========================================================
+%% PID ASTROM-HAGGLUND
+%% ==========================================================
+Kp_ideal = (1/Knom) * ...
+          (0.2 + 0.45*(tau/L) - (L/tau));
+
+Ti_ideal = L*(0.4*L + 0.8*tau) / ...
+          (L + 0.1*tau);
+
+Td_ideal = (0.5*L*tau) / ...
+          (0.3*L + tau);
+
+%% ==========================================================
+%% GANHOS
+%% ==========================================================
+
+% Sintonia Original
+
+Kp1 = Kp_ideal;
+Ki1 = Kp_ideal/Ti_ideal;
+Kd1 = Kp_ideal*Td_ideal;
+
+% Sintonia Ajustada
+
+Kp2 = Kp_ideal - 0.1;
+Ki2 = (Kp_ideal/Ti_ideal) - 0.1;
+Kd2 = (Kp_ideal*Td_ideal) - 0.1;
+
+%% ==========================================================
+%% PARAMETROS PID
+%% ==========================================================
+
+umin = 0;
+umax = 24;
+
+Kb = 0.5;
+
+alpha = 0.95;
+
+n = length(t);
+
+%% ==========================================================
+%% VETORES
+%% ==========================================================
+
+y1 = zeros(n,1);
+u1 = zeros(n,1);
+
+y2 = zeros(n,1);
+u2 = zeros(n,1);
+
+%% ==========================================================
+%% SINTONIA ORIGINAL
+%% ==========================================================
+
+x1 = zeros(size(A,1),1);
+
+I1 = 0;
+yant1 = 0;
+df1 = 0;
+
+for k = 2:n
+
+    e = yref - y1(k-1);
+
+    dydt = (y1(k-1)-yant1)/Ts;
+
+    df1 = alpha*df1 + (1-alpha)*dydt;
+
+    Dterm = -Kd1*df1;
+
+    upid = Kp1*e + I1 + Dterm;
+
+    u1(k) = min(max(upid,umin),umax);
+
+    I1 = I1 ...
+       + Ki1*e*Ts ...
+       + Kb*(u1(k)-upid)*Ts;
+
+    x1 = A*x1 + B*u1(k);
+
+    y1(k) = Cp*x1 + Dp*u1(k);
+
+    yant1 = y1(k);
+
+end
+
+%% ==========================================================
+%% SINTONIA AJUSTADA
+%% ==========================================================
+
+x2 = zeros(size(A,1),1);
+
+I2 = 0;
+yant2 = 0;
+df2 = 0;
+
+for k = 2:n
+
+    e = yref - y2(k-1);
+
+    dydt = (y2(k-1)-yant2)/Ts;
+
+    df2 = alpha*df2 + (1-alpha)*dydt;
+
+    Dterm = -Kd2*df2;
+
+    upid = Kp2*e + I2 + Dterm;
+
+    u2(k) = min(max(upid,umin),umax);
+
+    I2 = I2 ...
+       + Ki2*e*Ts ...
+       + Kb*(u2(k)-upid)*Ts;
+
+    x2 = A*x2 + B*u2(k);
+
+    y2(k) = Cp*x2 + Dp*u2(k);
+
+    yant2 = y2(k);
+
+end
+
+%% ==========================================================
+%% RESPOSTA AO DEGRAU
+%% ==========================================================
+
+figure
+
+plot(t,y1,'b','LineWidth',2)
+hold on
+
+plot(t,y2,'r--','LineWidth',2)
+
+yline(yref,'k:','120 mm')
+
+grid on
+
+xlabel('Tempo (s)')
+ylabel('Nível (mm)')
+
+title('Comparação das Respostas ao Degrau')
+
+legend('Sintonia Original', ...
+       'Sintonia Ajustada (-0.1)', ...
+       'Referência', ...
+       'Location','best')
+
+%% ==========================================================
+%% SINAL DE CONTROLE
+%% ==========================================================
+
+figure
+
+plot(t,u1,'b','LineWidth',2)
+hold on
+
+plot(t,u2,'r--','LineWidth',2)
+
+yline(24,'k:','24 V')
+
+grid on
+
+xlabel('Tempo (s)')
+ylabel('Tensão (V)')
+
+title('Comparação dos Sinais de Controle')
+
+legend('Sintonia Original', ...
+       'Sintonia Ajustada (-0.1)', ...
+       'Saturação', ...
+       'Location','best')
+
+%% ==========================================================
+%% ANALISE DE FREQUENCIA
+%% ==========================================================
+
+s = tf('s');
+
+Tf = -Ts/log(alpha);
+
+C1 = Kp1 + Ki1/s + (Kd1*s)/(Tf*s+1);
+C2 = Kp2 + Ki2/s + (Kd2*s)/(Tf*s+1);
+
+L1 = C1*G;
+L2 = C2*G;
+
+[Gm1,Pm1,Wcg1,Wcp1] = margin(L1);
+[Gm2,Pm2,Wcg2,Wcp2] = margin(L2);
+
+%% ==========================================================
+%% BODE
+%% ==========================================================
+
+figure
+
+bode(L1,'b',L2,'r--')
+grid on
+
+title('Comparação das Respostas em Frequência')
+
+legend({sprintf('Original | GM=%.2f dB | PM=%.2f°', ...
+       20*log10(Gm1),Pm1), ...
+       sprintf('Ajustada | GM=%.2f dB | PM=%.2f°', ...
+       20*log10(Gm2),Pm2)}, ...
+       'Location','southwest')
+
+%% ==========================================================
+%% RESULTADOS DAS MARGENS
+%% ==========================================================
+
+fprintf('\n');
+fprintf('=====================================\n');
+fprintf('ANALISE DE ROBUSTEZ\n');
+fprintf('=====================================\n');
+
+fprintf('\nSINTONIA ORIGINAL\n');
+fprintf('GM = %.2f dB\n',20*log10(Gm1));
+fprintf('PM = %.2f graus\n',Pm1);
+
+fprintf('\nSINTONIA AJUSTADA (-0.1)\n');
+fprintf('GM = %.2f dB\n',20*log10(Gm2));
+fprintf('PM = %.2f graus\n',Pm2);
+
+%% ==========================================================
+%% POLOS DA MALHA FECHADA
+%% ==========================================================
+
+[numPade,denPade] = pade(L,3);
+
+DelayPade = tf(numPade,denPade);
+
+Gpade = tf(K,[tau 1])*DelayPade;
+
+T1 = feedback(C1*Gpade,1);
+T2 = feedback(C2*Gpade,1);
+
+p1 = pole(T1);
+p2 = pole(T2);
+
+%% ==========================================================
+%% GRAFICO DOS POLOS
+%% ==========================================================
+
+figure
+
+plot(real(p1),imag(p1), ...
+    'bx', ...
+    'MarkerSize',14, ...
+    'LineWidth',2)
+
+hold on
+
+plot(real(p2),imag(p2), ...
+    'ro', ...
+    'MarkerSize',10, ...
+    'LineWidth',2)
+
+xline(0,'k--','Eixo Imaginário')
+yline(0,'k--')
+
+grid on
+box on
+
+xlabel('Parte Real')
+ylabel('Parte Imaginária')
+
+title('Comparação dos Polos da Malha Fechada')
+
+legend('Polos - Sintonia Original', ...
+       'Polos - Sintonia Ajustada (-0.1)', ...
+       'Location','best')
+
+%% ==========================================================
+%% RESULTADOS DOS POLOS
+%% ==========================================================
+
+fprintf('\n');
+fprintf('=====================================\n');
+fprintf('POLOS DA MALHA FECHADA\n');
+fprintf('=====================================\n');
+
+fprintf('\nPolos - Sintonia Original\n');
+disp(p1)
+
+fprintf('\nPolos - Sintonia Ajustada (-0.1)\n');
+disp(p2)
+
+[~,idx1] = max(real(p1));
+[~,idx2] = max(real(p2));
+
+fprintf('\nPolo dominante Original:\n');
+fprintf('%.4f %+ .4fj\n', ...
+        real(p1(idx1)), ...
+        imag(p1(idx1)));
+
+fprintf('\nPolo dominante Ajustada:\n');
+fprintf('%.4f %+ .4fj\n', ...
+        real(p2(idx2)), ...
+        imag(p2(idx2)));
+
